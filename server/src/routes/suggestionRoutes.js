@@ -52,19 +52,24 @@ router.get(
   handleValidationErrors, 
   async (req, res) => {
     try {
-      const suggestion = await suggestionService.getSuggestionByTrackingCode(
+      const result = await suggestionService.getSuggestionByTrackingCode(
         req.params.trackingCode
       );
 
-      if (!suggestion) {
+      if (!result.found) {
+        const messages = {
+          not_found: 'Suggestion not found with this tracking code',
+          deleted: 'This report has been removed by an administrator',
+        };
         return res.status(404).json({
           success: false,
-          message: 'Suggestion not found with this tracking code'
+          message: messages[result.reason] || messages.not_found,
+          reason: result.reason,
         });
       }
 
       // Use public DTO to hide sensitive information
-      const responseDto = new PublicSuggestionResponseDTO(suggestion);
+      const responseDto = new PublicSuggestionResponseDTO(result.suggestion);
 
       res.json({
         success: true,

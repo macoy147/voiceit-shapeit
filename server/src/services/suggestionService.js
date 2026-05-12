@@ -69,10 +69,15 @@ class SuggestionService {
 
       if (!suggestion) {
         logger.warn('Suggestion not found', { trackingCode });
-        return null;
+        return { found: false, reason: 'not_found' };
       }
 
-      return suggestion;
+      if (suggestion.isDeleted) {
+        logger.warn('Suggestion was deleted', { trackingCode });
+        return { found: false, reason: 'deleted' };
+      }
+
+      return { found: true, suggestion };
     } catch (error) {
       logger.error('Error fetching suggestion by tracking code', {
         trackingCode,

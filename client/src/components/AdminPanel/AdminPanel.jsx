@@ -1554,6 +1554,88 @@ function AdminPanel() {
                 </button>
               </div>
 
+              {/* Quick Actions Panel */}
+              <div className="quick-actions-panel">
+                <button 
+                  className="quick-action-card unread"
+                  onClick={() => {
+                    setActiveTab('suggestions');
+                    setFilters(prev => ({ ...prev, status: 'submitted' }));
+                  }}
+                >
+                  <div className="quick-action-icon">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                      <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+                    </svg>
+                    {unreadCount > 0 && <span className="badge">{unreadCount}</span>}
+                  </div>
+                  <div className="quick-action-info">
+                    <span className="quick-action-value">{unreadCount}</span>
+                    <span className="quick-action-label">Unread</span>
+                  </div>
+                </button>
+
+                <button 
+                  className="quick-action-card urgent"
+                  onClick={() => {
+                    setActiveTab('suggestions');
+                    // Filter by urgent priority - need to add priority filter
+                  }}
+                >
+                  <div className="quick-action-icon">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                      <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+                    </svg>
+                  </div>
+                  <div className="quick-action-info">
+                    <span className="quick-action-value">
+                      {stats.byPriority?.find(p => p._id === 'urgent')?.count || 0}
+                    </span>
+                    <span className="quick-action-label">Urgent</span>
+                  </div>
+                </button>
+
+                <button 
+                  className="quick-action-card pending"
+                  onClick={() => {
+                    setActiveTab('suggestions');
+                    setFilters(prev => ({ ...prev, status: 'under_review' }));
+                  }}
+                >
+                  <div className="quick-action-icon">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                    </svg>
+                  </div>
+                  <div className="quick-action-info">
+                    <span className="quick-action-value">
+                      {stats.byStatus?.find(s => s._id === 'under_review')?.count || 0}
+                    </span>
+                    <span className="quick-action-label">Under Review</span>
+                  </div>
+                </button>
+
+                <button 
+                  className="quick-action-card resolved"
+                  onClick={() => {
+                    setActiveTab('suggestions');
+                    setFilters(prev => ({ ...prev, status: 'resolved' }));
+                  }}
+                >
+                  <div className="quick-action-icon">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                      <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/>
+                    </svg>
+                  </div>
+                  <div className="quick-action-info">
+                    <span className="quick-action-value">
+                      {stats.byStatus?.find(s => s._id === 'resolved')?.count || 0}
+                    </span>
+                    <span className="quick-action-label">Resolved</span>
+                  </div>
+                </button>
+              </div>
+
               <div className="stats-grid">
                 <div className="stat-card total">
                   <div className="stat-icon">
@@ -1575,6 +1657,9 @@ function AdminPanel() {
                   <div className="stat-info">
                     <span className="stat-value">{stats.recentCount}</span>
                     <span className="stat-label">Last 7 Days</span>
+                    <span className="stat-trend">
+                      {stats.recentCount > (stats.total / 4) ? '↑' : stats.recentCount < (stats.total / 10) ? '↓' : '→'}
+                    </span>
                   </div>
                 </div>
                 <div className="stat-card anonymous">
@@ -1586,6 +1671,9 @@ function AdminPanel() {
                   <div className="stat-info">
                     <span className="stat-value">{stats.anonymousCount}</span>
                     <span className="stat-label">Anonymous</span>
+                    <span className="stat-percentage">
+                      {stats.total > 0 ? Math.round((stats.anonymousCount / stats.total) * 100) : 0}%
+                    </span>
                   </div>
                 </div>
                 <div className="stat-card identified">
@@ -1597,42 +1685,168 @@ function AdminPanel() {
                   <div className="stat-info">
                     <span className="stat-value">{stats.identifiedCount}</span>
                     <span className="stat-label">Identified</span>
+                    <span className="stat-percentage">
+                      {stats.total > 0 ? Math.round((stats.identifiedCount / stats.total) * 100) : 0}%
+                    </span>
                   </div>
                 </div>
               </div>
 
               <div className="charts-row">
                 <div className="chart-card">
-                  <h3>By Category</h3>
+                  <h3>
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                      <path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/>
+                    </svg>
+                    By Category
+                  </h3>
                   <div className="bar-chart">
-                    {stats.byCategory.map(item => (
-                      <div key={item._id} className="bar-item">
-                        <span className="bar-label">{item._id}</span>
-                        <div className="bar-track">
-                          <div 
-                            className="bar-fill" 
-                            style={{ width: `${(item.count / stats.total) * 100}%` }}
-                          />
+                    {stats.byCategory.map(item => {
+                      const categoryInfo = getCategoryInfo(item._id);
+                      return (
+                        <div key={item._id} className="bar-item">
+                          <span className="bar-label">
+                            <span className="category-icon">{categoryInfo.icon}</span>
+                            {categoryInfo.label}
+                          </span>
+                          <div className="bar-track">
+                            <div 
+                              className="bar-fill" 
+                              style={{ width: `${(item.count / stats.total) * 100}%` }}
+                            />
+                          </div>
+                          <span className="bar-value">{item.count}</span>
                         </div>
-                        <span className="bar-value">{item.count}</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
                 <div className="chart-card">
-                  <h3>By Status</h3>
+                  <h3>
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                    </svg>
+                    By Status
+                  </h3>
                   <div className="status-chart">
                     {stats.byStatus.map(item => {
                       const statusInfo = getStatusInfo(item._id);
+                      const percentage = Math.round((item.count / stats.total) * 100);
                       return (
                         <div key={item._id} className="status-item">
                           <span className="status-dot" style={{ background: statusInfo.color }} />
                           <span className="status-label">{statusInfo.label}</span>
+                          <div className="status-bar">
+                            <div 
+                              className="status-bar-fill" 
+                              style={{ 
+                                width: `${percentage}%`,
+                                background: statusInfo.color 
+                              }}
+                            />
+                          </div>
                           <span className="status-count">{item.count}</span>
                         </div>
                       );
                     })}
+                  </div>
+                </div>
+
+                <div className="chart-card priority-card">
+                  <h3>
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                      <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+                    </svg>
+                    By Priority
+                  </h3>
+                  <div className="priority-grid">
+                    {PRIORITY_OPTIONS.map(priority => {
+                      const count = stats.byPriority?.find(p => p._id === priority.value)?.count || 0;
+                      const percentage = stats.total > 0 ? Math.round((count / stats.total) * 100) : 0;
+                      return (
+                        <div key={priority.value} className="priority-item">
+                          <div className="priority-header">
+                            <span 
+                              className="priority-badge" 
+                              style={{ background: priority.color }}
+                            >
+                              {priority.label}
+                            </span>
+                            <span className="priority-count">{count}</span>
+                          </div>
+                          <div className="priority-bar-track">
+                            <div 
+                              className="priority-bar-fill" 
+                              style={{ 
+                                width: `${percentage}%`,
+                                background: priority.color 
+                              }}
+                            />
+                          </div>
+                          <span className="priority-percentage">{percentage}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="chart-card recent-activity-card">
+                  <h3>
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                      <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/>
+                    </svg>
+                    Recent Submissions
+                  </h3>
+                  <div className="recent-activity-list">
+                    {suggestions.slice(0, 5).map(suggestion => {
+                      const categoryInfo = getCategoryInfo(suggestion.category);
+                      const timeAgo = (() => {
+                        const now = new Date();
+                        const created = new Date(suggestion.createdAt);
+                        const diffMs = now - created;
+                        const diffMins = Math.floor(diffMs / 60000);
+                        const diffHours = Math.floor(diffMs / 3600000);
+                        const diffDays = Math.floor(diffMs / 86400000);
+                        
+                        if (diffMins < 1) return 'Just now';
+                        if (diffMins < 60) return `${diffMins}m ago`;
+                        if (diffHours < 24) return `${diffHours}h ago`;
+                        return `${diffDays}d ago`;
+                      })();
+                      
+                      return (
+                        <div 
+                          key={suggestion._id} 
+                          className="recent-activity-item"
+                          onClick={() => {
+                            setSelectedSuggestion(suggestion);
+                            setActiveTab('suggestions');
+                          }}
+                        >
+                          <span className="activity-icon">{categoryInfo.icon}</span>
+                          <div className="activity-info">
+                            <span className="activity-code">{suggestion.trackingCode}</span>
+                            <span className="activity-category">{categoryInfo.label}</span>
+                          </div>
+                          <span className="activity-time">{timeAgo}</span>
+                          {isUnread(suggestion._id) && <span className="activity-unread-dot" />}
+                        </div>
+                      );
+                    })}
+                    {suggestions.length === 0 && (
+                      <div className="empty-recent">
+                        <span>No recent submissions</span>
+                      </div>
+                    )}
+                    {suggestions.length > 0 && (
+                      <button 
+                        className="view-all-btn"
+                        onClick={() => setActiveTab('suggestions')}
+                      >
+                        View All Suggestions →
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
