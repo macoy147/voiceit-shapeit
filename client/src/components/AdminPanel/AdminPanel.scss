@@ -699,6 +699,11 @@
     background: #ef4444;
     color: #fff;
   }
+
+  &.info {
+    background: #3b82f6;
+    color: #fff;
+  }
   
   &.welcome {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -4315,6 +4320,10 @@
 
     &.error {
       background: #ef4444;
+    }
+
+    &.info {
+      background: #3b82f6;
     }
   }
 
@@ -8347,6 +8356,102 @@
 
     .activity-code {
       font-size: 12px;
+    }
+  }
+}
+
+
+// ==========================================
+// REAL-TIME CONNECTION STATUS INDICATOR
+// ==========================================
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  .brand-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .connection-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    transition: all 0.3s;
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      transition: all 0.3s;
+    }
+
+    .status-text {
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    &.connected {
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+
+      .status-dot {
+        background: #10b981;
+        box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+        animation: pulse-green 2s infinite;
+      }
+    }
+
+    &.disconnected {
+      background: rgba(239, 68, 68, 0.15);
+      color: #ef4444;
+
+      .status-dot {
+        background: #ef4444;
+        animation: pulse-red 2s infinite;
+      }
+    }
+  }
+}
+
+@keyframes pulse-green {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+  }
+  50% {
+    opacity: 0.6;
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.8);
+  }
+}
+
+@keyframes pulse-red {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+// Light mode connection status
+.light-mode {
+  .connection-status {
+    &.connected {
+      background: rgba(16, 185, 129, 0.1);
+      color: #059669;
+    }
+
+    &.disconnected {
+      background: rgba(239, 68, 68, 0.1);
+      color: #dc2626;
     }
   }
 }

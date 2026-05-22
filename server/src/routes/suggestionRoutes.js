@@ -11,6 +11,7 @@ import {
 } from '../validators/suggestion.validator.js';
 import { handleValidationErrors } from '../middleware/validationMiddleware.js';
 import logger from '../utils/logger.js';
+import realtimeNotificationService from '../services/realtimeNotificationService.js';
 
 const router = express.Router();
 
@@ -29,6 +30,19 @@ router.post(
 
       // Map to response DTO
       const responseDto = new CreateSuggestionResponseDTO(suggestion, aiAnalyzed);
+
+      // Push real-time notification to connected admins
+      const realtimePayload = {
+        _id: suggestion._id?.toString(),
+        trackingCode: suggestion.trackingCode,
+        category: suggestion.category,
+        title: suggestion.title,
+        status: suggestion.status,
+        priority: suggestion.priority,
+        isAnonymous: suggestion.isAnonymous,
+        createdAt: suggestion.createdAt
+      };
+      realtimeNotificationService.broadcastNewSuggestion(realtimePayload);
 
       res.status(201).json({
         success: true,

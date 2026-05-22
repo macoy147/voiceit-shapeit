@@ -29,6 +29,7 @@ import {
 import { handleValidationErrors } from '../middleware/validationMiddleware.js';
 import { verifyAdminPassword, requireDeveloperRole } from '../middleware/adminMiddleware.js';
 import logger from '../utils/logger.js';
+import realtimeNotificationService from '../services/realtimeNotificationService.js';
 
 const router = express.Router();
 const SESSION_NAME = process.env.SESSION_NAME || 'innovoice.sid';
@@ -110,6 +111,11 @@ router.post('/logout', verifyAdminPassword, async (req, res) => {
       message: 'Logout failed. Please try again later.'
     });
   }
+});
+
+// GET /api/admin/notifications/stream - Real-time notification stream for admins
+router.get('/notifications/stream', verifyAdminPassword, (req, res) => {
+  realtimeNotificationService.subscribeAdmin(req, res);
 });
 
 // POST /api/admin/logout-beacon - Handle logout when tab closes

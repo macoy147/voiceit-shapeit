@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './AdminPanel.scss';
 import API_URL from '../../config/api';
@@ -143,6 +143,10 @@ function AdminPanel() {
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0, limit: 20 });
   const [activeTab, setActiveTab] = useState('dashboard');
   const [notification, setNotification] = useState(null);
+  const [realtimeRefreshTick, setRealtimeRefreshTick] = useState(0);
+  const [sseConnected, setSseConnected] = useState(false);
+  const notificationTimeoutRef = useRef(null);
+  const lastRealtimeSuggestionIdRef = useRef(null);
   
   // Dropdown & sidebar states
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
@@ -190,6 +194,14 @@ function AdminPanel() {
   useEffect(() => {
     localStorage.setItem('adminDarkMode', JSON.stringify(darkMode));
   }, [darkMode]);
+
+  useEffect(() => {
+    return () => {
+      if (notificationTimeoutRef.current) {
+        clearTimeout(notificationTimeoutRef.current);
+      }
+    };
+  }, []);
   
   // Calculate unread count - use stats if available, otherwise count from suggestions
   const unreadCount = stats?.unreadCount !== undefined 
@@ -297,7 +309,140 @@ function AdminPanel() {
       fetchSuggestions();
       fetchOnlineAdmins();
     }
-  }, [isAuthenticated, filters, pagination.page]);
+  }, [isAuthenticated, filters, pagination.page, realtimeRefreshTick]);
+
+  // Helper to play a short notification "ding" using Web Audio API
+  const playNotificationSound = () => {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+      const audioCtx = new AudioContext();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+      oscillator.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.1); // A5
+      
+      gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.05);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.5);
+    } catch (e) {
+      console.error('Failed to play sound:', e);
+    }
+  };
+
+  // Real-time suggestion notifications (SSE)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    // Request native browser notification permissions
+    if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+      Notification.requestPermission();
+    }
+
+    let eventSource;
+    try {
+      eventSource = new EventSource(`${API_URL}/api/admin/notifications/stream`, {
+        withCredentials: true
+      });
+      
+      console.log('[SSE] Connecting to notification stream...');
+    } catch (error) {
+      console.error('[SSE] Failed to connect notification stream:', error);
+      setSseConnected(false);
+      return;
+    }
+
+    eventSource.addEventListener('connected', (event) => {
+      console.log('[SSE] Connected successfully:', event.data);
+      setSseConnected(true);
+      showNotification('Real-time notifications active 🔔', 'success', 2000);
+    });
+
+    eventSource.addEventListener('heartbeat', (event) => {
+      console.log('[SSE] Heartbeat received');
+      setSseConnected(true);
+    });
+
+    eventSource.addEventListener('new_suggestion', (event) => {
+      try {
+        console.log('[SSE] New suggestion event received:', event.data);
+        const payload = JSON.parse(event.data || '{}');
+        const suggestion = payload?.suggestion;
+
+        if (!suggestion?._id) {
+          console.warn('[SSE] Invalid suggestion data');
+          return;
+        }
+        
+        if (lastRealtimeSuggestionIdRef.current === suggestion._id) {
+          console.log('[SSE] Duplicate suggestion, skipping');
+          return;
+        }
+
+        lastRealtimeSuggestionIdRef.current = suggestion._id;
+        const categoryLabel = getCategoryInfo(suggestion.category).label;
+        const trackingCode = suggestion.trackingCode || 'New Submission';
+
+        console.log('[SSE] Processing new suggestion:', trackingCode);
+
+        // 1. In-app toast notification
+        showNotification(`🔔 New ${categoryLabel} suggestion: ${trackingCode}`, 'info', 5000);
+        
+        // 2. Native Browser Push Notification (like Facebook)
+        if ('Notification' in window && Notification.permission === 'granted') {
+          const nativeNotification = new Notification(`New ${categoryLabel} Suggestion!`, {
+            body: `Tracking Code: ${trackingCode}\nA new report has been submitted.`,
+            icon: '/ssg-logo.png',
+            badge: '/ssg-logo.png',
+            tag: suggestion._id,
+            requireInteraction: false
+          });
+          
+          nativeNotification.onclick = () => {
+            window.focus();
+            setActiveTab('suggestions');
+            nativeNotification.close();
+          };
+          
+          playNotificationSound();
+        }
+
+        // 3. Refresh data
+        console.log('[SSE] Triggering data refresh...');
+        setRealtimeRefreshTick((prev) => prev + 1);
+        fetchStats();
+      } catch (error) {
+        console.error('[SSE] Failed to parse real-time notification:', error);
+      }
+    });
+
+    eventSource.addEventListener('error', (error) => {
+      console.error('[SSE] Connection error:', error);
+      setSseConnected(false);
+      if (eventSource.readyState === EventSource.CLOSED) {
+        console.log('[SSE] Connection closed, will auto-reconnect');
+      }
+    });
+
+    eventSource.addEventListener('open', () => {
+      console.log('[SSE] Connection opened');
+      setSseConnected(true);
+    });
+
+    return () => {
+      console.log('[SSE] Closing connection');
+      setSseConnected(false);
+      eventSource.close();
+    };
+  }, [isAuthenticated]);
 
   // Heartbeat and online admins polling - only when tab is visible
   useEffect(() => {
@@ -393,9 +538,15 @@ function AdminPanel() {
     navigate('/');
   };
 
-  const showNotification = (message, type = 'success') => {
+  const showNotification = (message, type = 'success', duration = 3000) => {
+    if (notificationTimeoutRef.current) {
+      clearTimeout(notificationTimeoutRef.current);
+    }
     setNotification({ message, type });
-    setTimeout(() => setNotification(null), 3000);
+    notificationTimeoutRef.current = setTimeout(() => {
+      setNotification(null);
+      notificationTimeoutRef.current = null;
+    }, duration);
   };
 
   const closeAllDropdowns = () => {
@@ -1411,7 +1562,15 @@ function AdminPanel() {
           <div className="sidebar-header">
             <div className="brand">
               <img src="/ssg-logo.png" alt="SSG Logo" className="brand-logo" />
-              {!sidebarCollapsed && <span className="brand-text">Admin Panel</span>}
+              {!sidebarCollapsed && (
+                <div className="brand-info">
+                  <span className="brand-text">Admin Panel</span>
+                  <span className={`connection-status ${sseConnected ? 'connected' : 'disconnected'}`} title={sseConnected ? 'Real-time notifications active' : 'Connecting...'}>
+                    <span className="status-dot"></span>
+                    {!sidebarCollapsed && <span className="status-text">{sseConnected ? 'Live' : 'Offline'}</span>}
+                  </span>
+                </div>
+              )}
             </div>
             <button 
               className="collapse-btn desktop-only"
