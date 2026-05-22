@@ -2,6 +2,13 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './AdminPanel.scss';
 import API_URL from '../../config/api';
+import ProfilePanel from './ProfilePanel';
+import { 
+  SuggestionCardSkeleton, 
+  StatsCardSkeleton, 
+  ActivityLogSkeleton,
+  OnlineAdminSkeleton 
+} from '../SkeletonLoader/SkeletonLoader';
 
 const STATUS_OPTIONS = [
   { value: 'submitted', label: 'Submitted', color: '#6b7280' },
@@ -92,6 +99,7 @@ const getDateRange = (preset) => {
 function AdminPanel() {
   const navigate = useNavigate();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
@@ -278,7 +286,10 @@ function AdminPanel() {
     // Hydrate UI quickly (not used as authentication)
     if (savedAdminInfo) {
       try {
-        setAdminInfo(JSON.parse(savedAdminInfo));
+        const parsed = JSON.parse(savedAdminInfo);
+        setAdminInfo(parsed);
+        // Optimistically set as authenticated while validating
+        setIsAuthenticated(true);
       } catch {
         // ignore
       }
@@ -294,10 +305,18 @@ function AdminPanel() {
           sessionStorage.setItem('adminInfo', JSON.stringify(data.admin));
           setIsAuthenticated(true);
         } else {
+          // Session invalid - clear everything
           setIsAuthenticated(false);
+          setAdminInfo(null);
+          sessionStorage.removeItem('adminInfo');
         }
-      } catch {
-        setIsAuthenticated(false);
+      } catch (error) {
+        console.error('Session validation error:', error);
+        // Network error - keep optimistic state if we have saved info
+        if (!savedAdminInfo) {
+          setIsAuthenticated(false);
+          setAdminInfo(null);
+        }
       }
     })();
   }, []);
@@ -338,7 +357,7 @@ function AdminPanel() {
     }
   };
 
-  // Real-time suggestion notifications (SSE)
+  // Real-time suggestion notifications (using polling as fallback)
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -347,100 +366,91 @@ function AdminPanel() {
       Notification.requestPermission();
     }
 
-    let eventSource;
-    try {
-      eventSource = new EventSource(`${API_URL}/api/admin/notifications/stream`, {
-        withCredentials: true
-      });
-      
-      console.log('[SSE] Connecting to notification stream...');
-    } catch (error) {
-      console.error('[SSE] Failed to connect notification stream:', error);
-      setSseConnected(false);
-      return;
-    }
+    console.log('[Polling] Starting real-time polling...');
+    setSseConnected(true); // Show as connected since we're using polling
 
-    eventSource.addEventListener('connected', (event) => {
-      console.log('[SSE] Connected successfully:', event.data);
-      setSseConnected(true);
-      showNotification('Real-time notifications active 🔔', 'success', 2000);
-    });
+    let lastCheckTime = new Date().toISOString();
+    let pollInterval;
 
-    eventSource.addEventListener('heartbeat', (event) => {
-      console.log('[SSE] Heartbeat received');
-      setSseConnected(true);
-    });
-
-    eventSource.addEventListener('new_suggestion', (event) => {
+    const checkForNewSubmissions = async () => {
       try {
-        console.log('[SSE] New suggestion event received:', event.data);
-        const payload = JSON.parse(event.data || '{}');
-        const suggestion = payload?.suggestion;
+        // Fetch suggestions created after last check
+        const res = await fetch(`${API_URL}/api/admin/suggestions?limit=5&sort=newest`, {
+          credentials: 'include'
+        });
 
-        if (!suggestion?._id) {
-          console.warn('[SSE] Invalid suggestion data');
+        if (!res.ok) {
+          console.error('[Polling] Failed to fetch:', res.status);
+          if (res.status === 401) {
+            setSseConnected(false);
+          }
           return;
         }
-        
-        if (lastRealtimeSuggestionIdRef.current === suggestion._id) {
-          console.log('[SSE] Duplicate suggestion, skipping');
-          return;
+
+        const data = await res.json();
+        if (data.success && data.data && data.data.length > 0) {
+          const newestSuggestion = data.data[0];
+          const suggestionTime = new Date(newestSuggestion.createdAt).toISOString();
+
+          // Check if this is a new suggestion since last check
+          if (suggestionTime > lastCheckTime) {
+            // Check if we haven't already notified about this one
+            if (lastRealtimeSuggestionIdRef.current !== newestSuggestion._id) {
+              lastRealtimeSuggestionIdRef.current = newestSuggestion._id;
+              
+              const categoryLabel = getCategoryInfo(newestSuggestion.category).label;
+              const trackingCode = newestSuggestion.trackingCode || 'New Submission';
+
+              console.log('[Polling] New suggestion detected:', trackingCode);
+
+              // 1. In-app toast notification
+              showNotification(`🔔 New ${categoryLabel} suggestion: ${trackingCode}`, 'info', 5000);
+              
+              // 2. Native Browser Push Notification
+              if ('Notification' in window && Notification.permission === 'granted') {
+                const nativeNotification = new Notification(`New ${categoryLabel} Suggestion!`, {
+                  body: `Tracking Code: ${trackingCode}\nA new report has been submitted.`,
+                  icon: '/ssg-logo.png',
+                  badge: '/ssg-logo.png',
+                  tag: newestSuggestion._id,
+                  requireInteraction: false
+                });
+                
+                nativeNotification.onclick = () => {
+                  window.focus();
+                  setActiveTab('suggestions');
+                  nativeNotification.close();
+                };
+                
+                playNotificationSound();
+              }
+
+              // 3. Refresh data
+              setRealtimeRefreshTick((prev) => prev + 1);
+              fetchStats();
+            }
+            
+            lastCheckTime = suggestionTime;
+          }
         }
-
-        lastRealtimeSuggestionIdRef.current = suggestion._id;
-        const categoryLabel = getCategoryInfo(suggestion.category).label;
-        const trackingCode = suggestion.trackingCode || 'New Submission';
-
-        console.log('[SSE] Processing new suggestion:', trackingCode);
-
-        // 1. In-app toast notification
-        showNotification(`🔔 New ${categoryLabel} suggestion: ${trackingCode}`, 'info', 5000);
-        
-        // 2. Native Browser Push Notification (like Facebook)
-        if ('Notification' in window && Notification.permission === 'granted') {
-          const nativeNotification = new Notification(`New ${categoryLabel} Suggestion!`, {
-            body: `Tracking Code: ${trackingCode}\nA new report has been submitted.`,
-            icon: '/ssg-logo.png',
-            badge: '/ssg-logo.png',
-            tag: suggestion._id,
-            requireInteraction: false
-          });
-          
-          nativeNotification.onclick = () => {
-            window.focus();
-            setActiveTab('suggestions');
-            nativeNotification.close();
-          };
-          
-          playNotificationSound();
-        }
-
-        // 3. Refresh data
-        console.log('[SSE] Triggering data refresh...');
-        setRealtimeRefreshTick((prev) => prev + 1);
-        fetchStats();
       } catch (error) {
-        console.error('[SSE] Failed to parse real-time notification:', error);
+        console.error('[Polling] Error:', error);
+        setSseConnected(false);
       }
-    });
+    };
 
-    eventSource.addEventListener('error', (error) => {
-      console.error('[SSE] Connection error:', error);
-      setSseConnected(false);
-      if (eventSource.readyState === EventSource.CLOSED) {
-        console.log('[SSE] Connection closed, will auto-reconnect');
-      }
-    });
-
-    eventSource.addEventListener('open', () => {
-      console.log('[SSE] Connection opened');
-      setSseConnected(true);
-    });
+    // Initial check after 2 seconds
+    const initialTimeout = setTimeout(() => {
+      checkForNewSubmissions();
+      // Then poll every 5 seconds
+      pollInterval = setInterval(checkForNewSubmissions, 5000);
+    }, 2000);
 
     return () => {
-      console.log('[SSE] Closing connection');
+      console.log('[Polling] Stopping real-time polling');
+      clearTimeout(initialTimeout);
+      if (pollInterval) clearInterval(pollInterval);
       setSseConnected(false);
-      eventSource.close();
     };
   }, [isAuthenticated]);
 
@@ -574,11 +584,11 @@ function AdminPanel() {
     setLoginError('');
 
     try {
-      const res = await fetch(`${API_URL}/api/admin/verify`, {
+      const res = await fetch(`${API_URL}/api/admin/login`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password })
+        body: JSON.stringify({ username, password })
       });
 
       const data = await res.json();
@@ -592,9 +602,10 @@ function AdminPanel() {
           }, 300);
         }
         setIsAuthenticated(true);
+        setUsername('');
         setPassword('');
       } else {
-        setLoginError('Invalid password');
+        setLoginError(data.message || 'Invalid username or password');
       }
     } catch (error) {
       setLoginError('Connection error. Please try again.');
@@ -969,16 +980,28 @@ function AdminPanel() {
             <div className="login-header">
               <span className="lock-icon">🔐</span>
               <h2>Admin Access</h2>
-              <p>Enter password to access the admin panel</p>
+              <p>Enter your credentials to access the admin panel</p>
             </div>
             <form onSubmit={handleLogin}>
+              <div className="input-wrapper">
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Username"
+                  autoComplete="username"
+                  required
+                  autoFocus
+                />
+              </div>
               <div className="password-input-wrapper">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter admin password"
-                  autoFocus
+                  placeholder="Password"
+                  autoComplete="current-password"
+                  required
                 />
                 <button 
                   type="button" 
@@ -990,8 +1013,8 @@ function AdminPanel() {
                 </button>
               </div>
               {loginError && <div className="error-msg">{loginError}</div>}
-              <button type="submit" disabled={isLoading}>
-                {isLoading ? 'Verifying...' : 'Login'}
+              <button type="submit" disabled={isLoading || !username || !password}>
+                {isLoading ? 'Logging in...' : 'Login'}
               </button>
             </form>
           </div>
@@ -1636,6 +1659,17 @@ function AdminPanel() {
               </svg>
               {!sidebarCollapsed && <span>Activity Logs</span>}
             </button>
+            
+            <button 
+              className={`nav-item ${activeTab === 'profile' ? 'active' : ''}`}
+              onClick={() => setActiveTab('profile')}
+              title="Profile"
+            >
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+              </svg>
+              {!sidebarCollapsed && <span>Profile</span>}
+            </button>
           </nav>
 
           {/* Online Admins Section */}
@@ -1646,8 +1680,8 @@ function AdminPanel() {
                 <span className="online-title">Online Now ({onlineAdmins.length})</span>
               </div>
               <div className="online-list">
-                {onlineAdmins.map(admin => (
-                  <div key={admin.label} className="online-admin-item">
+                {onlineAdmins.map((admin, index) => (
+                  <div key={`${admin.label}-${admin.loginTime || index}`} className="online-admin-item">
                     <div className="online-avatar" style={{ background: admin.color }}>
                       {admin.label.charAt(0)}
                     </div>
@@ -1796,59 +1830,69 @@ function AdminPanel() {
               </div>
 
               <div className="stats-grid">
-                <div className="stat-card total">
-                  <div className="stat-icon">
-                    <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
-                      <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
-                    </svg>
-                  </div>
-                  <div className="stat-info">
-                    <span className="stat-value">{stats.total}</span>
-                    <span className="stat-label">Total Suggestions</span>
-                  </div>
-                </div>
-                <div className="stat-card recent">
-                  <div className="stat-icon">
-                    <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
-                      <path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20a2 2 0 002 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11zM9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2z"/>
-                    </svg>
-                  </div>
-                  <div className="stat-info">
-                    <span className="stat-value">{stats.recentCount}</span>
-                    <span className="stat-label">Last 7 Days</span>
-                    <span className="stat-trend">
-                      {stats.recentCount > (stats.total / 4) ? '↑' : stats.recentCount < (stats.total / 10) ? '↓' : '→'}
-                    </span>
-                  </div>
-                </div>
-                <div className="stat-card anonymous">
-                  <div className="stat-icon">
-                    <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
-                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
-                    </svg>
-                  </div>
-                  <div className="stat-info">
-                    <span className="stat-value">{stats.anonymousCount}</span>
-                    <span className="stat-label">Anonymous</span>
-                    <span className="stat-percentage">
-                      {stats.total > 0 ? Math.round((stats.anonymousCount / stats.total) * 100) : 0}%
-                    </span>
-                  </div>
-                </div>
-                <div className="stat-card identified">
-                  <div className="stat-icon">
-                    <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
-                      <path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72L12 15l5-2.73v3.72z"/>
-                    </svg>
-                  </div>
-                  <div className="stat-info">
-                    <span className="stat-value">{stats.identifiedCount}</span>
-                    <span className="stat-label">Identified</span>
-                    <span className="stat-percentage">
-                      {stats.total > 0 ? Math.round((stats.identifiedCount / stats.total) * 100) : 0}%
-                    </span>
-                  </div>
-                </div>
+                {!stats ? (
+                  <>
+                    {[1, 2, 3, 4].map(i => (
+                      <StatsCardSkeleton key={i} />
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    <div className="stat-card total">
+                      <div className="stat-icon">
+                        <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+                          <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
+                        </svg>
+                      </div>
+                      <div className="stat-info">
+                        <span className="stat-value">{stats.total}</span>
+                        <span className="stat-label">Total Suggestions</span>
+                      </div>
+                    </div>
+                    <div className="stat-card recent">
+                      <div className="stat-icon">
+                        <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+                          <path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20a2 2 0 002 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11zM9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2z"/>
+                        </svg>
+                      </div>
+                      <div className="stat-info">
+                        <span className="stat-value">{stats.recentCount}</span>
+                        <span className="stat-label">Last 7 Days</span>
+                        <span className="stat-trend">
+                          {stats.recentCount > (stats.total / 4) ? '↑' : stats.recentCount < (stats.total / 10) ? '↓' : '→'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="stat-card anonymous">
+                      <div className="stat-icon">
+                        <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+                          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
+                        </svg>
+                      </div>
+                      <div className="stat-info">
+                        <span className="stat-value">{stats.anonymousCount}</span>
+                        <span className="stat-label">Anonymous</span>
+                        <span className="stat-percentage">
+                          {stats.total > 0 ? Math.round((stats.anonymousCount / stats.total) * 100) : 0}%
+                        </span>
+                      </div>
+                    </div>
+                    <div className="stat-card identified">
+                      <div className="stat-icon">
+                        <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+                          <path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72L12 15l5-2.73v3.72z"/>
+                        </svg>
+                      </div>
+                      <div className="stat-info">
+                        <span className="stat-value">{stats.identifiedCount}</span>
+                        <span className="stat-label">Identified</span>
+                        <span className="stat-percentage">
+                          {stats.total > 0 ? Math.round((stats.identifiedCount / stats.total) * 100) : 0}%
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="charts-row">
@@ -2495,7 +2539,11 @@ function AdminPanel() {
                 {/* Suggestions List */}
                 <div className="suggestions-list">
                   {isLoading ? (
-                    <div className="loading">Loading...</div>
+                    <>
+                      {[1, 2, 3, 4, 5].map(i => (
+                        <SuggestionCardSkeleton key={i} />
+                      ))}
+                    </>
                   ) : suggestions.length === 0 ? (
                     <div className="empty">No suggestions found</div>
                   ) : (
@@ -3305,7 +3353,13 @@ function AdminPanel() {
 
               {/* Timeline View */}
               <div className="activity-timeline">
-                {activityLogs.length === 0 ? (
+                {activityRefreshing ? (
+                  <div className="activity-logs-skeleton">
+                    {[1, 2, 3, 4, 5, 6].map(i => (
+                      <ActivityLogSkeleton key={i} />
+                    ))}
+                  </div>
+                ) : activityLogs.length === 0 ? (
                   <div className="empty-logs">
                     <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor">
                       <path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0013 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/>
@@ -3404,6 +3458,38 @@ function AdminPanel() {
                 </div>
               )}
             </div>
+          )}
+
+          {/* Profile Tab */}
+          {activeTab === 'profile' && (
+            <ProfilePanel 
+              adminInfo={adminInfo}
+              onProfileUpdate={async (updatedProfile) => {
+                // Refresh admin info after profile update
+                try {
+                  const res = await fetch(`${API_URL}/api/admin/me`, { credentials: 'include' });
+                  const data = await res.json();
+                  if (data.success && data.admin) {
+                    setAdminInfo(data.admin);
+                    sessionStorage.setItem('adminInfo', JSON.stringify(data.admin));
+                    
+                    // Send heartbeat to update in-memory online admins cache
+                    await fetch(`${API_URL}/api/admin/heartbeat`, {
+                      method: 'POST',
+                      credentials: 'include'
+                    });
+                    
+                    // Refresh online admins list to show updated profile
+                    fetchOnlineAdmins();
+                    
+                    // Force re-render to update sidebar colors
+                    setRealtimeRefreshTick(prev => prev + 1);
+                  }
+                } catch (error) {
+                  console.error('Error refreshing admin info:', error);
+                }
+              }}
+            />
           )}
         </main>
       </div>

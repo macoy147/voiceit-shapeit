@@ -10,6 +10,7 @@ import MongoStore from 'connect-mongo';
 import connectDB from './config/database.js';
 import suggestionRoutes from './routes/suggestionRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import profileRoutes from './routes/profileRoutes.js';
 import logger from './utils/logger.js';
 
 // Load environment variables
@@ -107,17 +108,18 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'dev-insecure-secret',
   resave: false,
   saveUninitialized: false,
-  rolling: true,
+  rolling: true, // Refresh session on every request
   store: MongoStore.create({
     mongoUrl: process.env.MONGODB_URI,
     collectionName: 'sessions',
-    ttl: 60 * 60 * 8 // 8 hours
+    ttl: 60 * 60 * 24 // 24 hours (increased from 8 hours)
   }),
   cookie: {
     httpOnly: true,
     secure: IS_PROD,                 // required for SameSite=None in production
     sameSite: IS_PROD ? 'none' : 'lax',
-    maxAge: 1000 * 60 * 60 * 8       // 8 hours
+    maxAge: 1000 * 60 * 60 * 24,     // 24 hours (increased from 8 hours)
+    path: '/'                         // Ensure cookie is available for all paths
   }
 }));
 
@@ -143,6 +145,7 @@ app.use('/api/suggestions', submissionLimiter);
 
 app.use('/api/suggestions', suggestionRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/profile', profileRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

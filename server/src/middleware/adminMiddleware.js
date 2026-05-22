@@ -1,36 +1,17 @@
-import adminService from '../services/adminService.js';
 import logger from '../utils/logger.js';
 
-export const verifyAdminPassword = (req, res, next) => {
-  // Prefer session-based auth
+export const verifyAdminAuth = (req, res, next) => {
+  // Check session-based auth
   if (req.session?.admin) {
     req.adminInfo = req.session.admin;
     return next();
   }
 
-  const password = req.headers['x-admin-password'];
-  
-  if (!password) {
-    logger.warn('Admin authentication failed: No password provided');
-    return res.status(401).json({
-      success: false,
-      message: 'Admin authentication required'
-    });
-  }
-  
-  const adminInfo = adminService.getAdminInfo(password);
-  
-  if (!adminInfo) {
-    logger.warn('Admin authentication failed: Invalid password');
-    return res.status(401).json({
-      success: false,
-      message: 'Invalid admin password'
-    });
-  }
-  
-  // Attach admin info to request
-  req.adminInfo = adminInfo;
-  next();
+  logger.warn('Admin authentication failed: No valid session');
+  return res.status(401).json({
+    success: false,
+    message: 'Admin authentication required. Please login.'
+  });
 };
 
 export const requireDeveloperRole = (req, res, next) => {

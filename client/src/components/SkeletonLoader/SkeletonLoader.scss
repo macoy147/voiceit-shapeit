@@ -1,0 +1,229 @@
+// Skeleton Base Animation
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.05) 0%,
+    rgba(255, 255, 255, 0.1) 50%,
+    rgba(255, 255, 255, 0.05) 100%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite linear;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.skeleton-card {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+// Suggestion Card Skeleton
+.suggestion-card.skeleton-card {
+  .suggestion-card-header,
+  .suggestion-card-body,
+  .suggestion-card-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .skeleton-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .skeleton-title {
+    margin-bottom: 8px;
+  }
+}
+
+// Stats Card Skeleton
+.stat-card.skeleton-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+
+  .stat-icon-wrapper {
+    flex-shrink: 0;
+  }
+
+  .stat-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+  }
+}
+
+// Activity Log Skeleton
+.activity-item.skeleton-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+
+  .activity-icon-wrapper {
+    flex-shrink: 0;
+  }
+
+  .activity-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .activity-time {
+    flex-shrink: 0;
+  }
+}
+
+// Profile Skeleton
+.profile-skeleton {
+  padding: 1.5rem 2rem;
+
+  .profile-header-skeleton {
+    margin-bottom: 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .profile-section-skeleton {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    padding: 1.25rem;
+    margin-bottom: 1.5rem;
+
+    .section-title {
+      margin-bottom: 1rem;
+    }
+
+    .profile-picture-skeleton {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+
+      > div {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+    }
+
+    .form-skeleton {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+  }
+}
+
+// Dashboard Skeleton
+.dashboard-skeleton {
+  .stats-grid-skeleton {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+
+  .suggestions-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+}
+
+// Activity Logs Skeleton
+.activity-logs-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+// Table Row Skeleton
+.table-row-skeleton {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 1rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+}
+
+// Online Admin Skeleton
+.online-admin-skeleton {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+
+  .admin-info-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+  }
+}
+
+// Dark mode adjustments
+@media (prefers-color-scheme: dark) {
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.03) 0%,
+      rgba(255, 255, 255, 0.08) 50%,
+      rgba(255, 255, 255, 0.03) 100%
+    );
+  }
+}
+
+// Light mode adjustments
+@media (prefers-color-scheme: light) {
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.05) 0%,
+      rgba(0, 0, 0, 0.1) 50%,
+      rgba(0, 0, 0, 0.05) 100%
+    );
+  }
+}
+
+// Responsive
+@media (max-width: 768px) {
+  .profile-skeleton {
+    padding: 1.25rem 1.5rem;
+
+    .profile-section-skeleton {
+      .profile-picture-skeleton {
+        flex-direction: column;
+        text-align: center;
+      }
+    }
+  }
+
+  .dashboard-skeleton {
+    .stats-grid-skeleton {
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    }
+  }
+}

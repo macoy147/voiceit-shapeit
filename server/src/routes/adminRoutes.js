@@ -1,6 +1,7 @@
 import express from 'express';
 import suggestionService from '../services/suggestionService.js';
 import adminService from '../services/adminService.js';
+import authService from '../services/authService.js';
 import { 
   SuggestionResponseDTO 
 } from '../dto/suggestion.dto.js';
@@ -24,10 +25,11 @@ import {
 } from '../validators/suggestion.validator.js';
 import { 
   adminVerifyValidator, 
+  adminLoginValidator,
   activityLogQueryValidator 
 } from '../validators/admin.validator.js';
 import { handleValidationErrors } from '../middleware/validationMiddleware.js';
-import { verifyAdminPassword, requireDeveloperRole } from '../middleware/adminMiddleware.js';
+import { verifyAdminAuth, requireDeveloperRole } from '../middleware/adminMiddleware.js';
 import logger from '../utils/logger.js';
 import realtimeNotificationService from '../services/realtimeNotificationService.js';
 
@@ -35,15 +37,17 @@ const router = express.Router();
 const SESSION_NAME = process.env.SESSION_NAME || 'innovoice.sid';
 const IS_PROD = process.env.NODE_ENV === 'production';
 
-// POST /api/admin/verify - Verify admin password
+// POST /api/admin/login - Admin login with username and password
 router.post(
-  '/verify', 
-  adminVerifyValidator, 
+  '/login', 
+  adminLoginValidator, 
   handleValidationErrors, 
   async (req, res) => {
     try {
-      const dto = new AdminVerifyDTO(req.body);
-      const adminInfo = adminService.verifyPassword(dto.password);
+      const { username, password } = req.body;
+      
+      // Authenticate admin
+      const adminInfo = await authService.login(username, password);
       
       if (adminInfo) {
         // Prevent session fixation: start a new session on login
@@ -52,28 +56,52 @@ router.post(
         });
 
         req.session.admin = {
+          id: adminInfo.id,
+          username: adminInfo.username,
           role: adminInfo.role,
           label: adminInfo.label,
           color: adminInfo.color
         };
         req.adminInfo = req.session.admin;
 
-        adminService.setAdminOnline(req.adminInfo);
+        authService.setAdminOnline(req.adminInfo);
         await adminService.logActivity(req, 'login', {});
 
         const responseDto = new AdminVerifyResponseDTO(req.adminInfo);
 
         res.json({
           success: true,
-          message: 'Password verified',
+          message: 'Login successful',
           admin: responseDto
         });
       } else {
         res.status(401).json({ 
           success: false, 
-          message: 'Invalid password' 
+          message: 'Invalid username or password' 
         });
       }
+    } catch (error) {
+      logger.error('Error in admin login endpoint', { error: error.message });
+      res.status(500).json({
+        success: false,
+        message: 'Authentication failed. Please try again later.'
+      });
+    }
+  }
+);
+
+// POST /api/admin/verify - Legacy endpoint for backward compatibility (deprecated)
+router.post(
+  '/verify', 
+  adminVerifyValidator, 
+  handleValidationErrors, 
+  async (req, res) => {
+    try {
+      res.status(410).json({
+        success: false,
+        message: 'This endpoint is deprecated. Please use /api/admin/login with username and password.',
+        deprecated: true
+      });
     } catch (error) {
       logger.error('Error in admin verify endpoint', { error: error.message });
       res.status(500).json({
@@ -85,15 +113,15 @@ router.post(
 );
 
 // GET /api/admin/me - Validate session and return admin info
-router.get('/me', verifyAdminPassword, async (req, res) => {
+router.get('/me', verifyAdminAuth, async (req, res) => {
   const responseDto = new AdminVerifyResponseDTO(req.adminInfo);
   res.json({ success: true, admin: responseDto });
 });
 
 // POST /api/admin/logout - Log logout activity
-router.post('/logout', verifyAdminPassword, async (req, res) => {
+router.post('/logout', verifyAdminAuth, async (req, res) => {
   try {
-    adminService.setAdminOffline(req.adminInfo.label);
+    authService.setAdminOffline(req.adminInfo.username);
     await adminService.logActivity(req, 'logout', {});
 
     if (req.session) {
@@ -114,7 +142,7 @@ router.post('/logout', verifyAdminPassword, async (req, res) => {
 });
 
 // GET /api/admin/notifications/stream - Real-time notification stream for admins
-router.get('/notifications/stream', verifyAdminPassword, (req, res) => {
+router.get('/notifications/stream', verifyAdminAuth, (req, res) => {
   realtimeNotificationService.subscribeAdmin(req, res);
 });
 
@@ -124,7 +152,7 @@ router.post('/logout-beacon', async (req, res) => {
     // Prefer session-based logout beacon
     if (req.session?.admin) {
       req.adminInfo = req.session.admin;
-      adminService.setAdminOffline(req.adminInfo.label);
+      authService.setAdminOffline(req.adminInfo.username);
       await adminService.logActivity(req, 'session_ended', {});
 
       req.session.destroy(() => {
@@ -132,19 +160,6 @@ router.post('/logout-beacon', async (req, res) => {
         res.json({ success: true });
       });
       return;
-    }
-
-    // Backward-compatible fallback (older clients)
-    const password = req.query.password;
-    const adminInfo = adminService.getAdminInfo(password);
-
-    if (adminInfo) {
-      adminService.setAdminOffline(adminInfo.label);
-      await adminService.logActivity(
-        { headers: { 'x-admin-password': password }, ip: req.ip, connection: req.connection },
-        'session_ended',
-        {}
-      );
     }
 
     res.json({ success: true });
@@ -155,9 +170,9 @@ router.post('/logout-beacon', async (req, res) => {
 });
 
 // POST /api/admin/heartbeat - Update last seen time
-router.post('/heartbeat', verifyAdminPassword, async (req, res) => {
+router.post('/heartbeat', verifyAdminAuth, async (req, res) => {
   try {
-    adminService.updateHeartbeat(req.adminInfo.label, req.adminInfo);
+    await authService.updateHeartbeat(req.adminInfo.username, req.adminInfo);
     res.json({ success: true });
   } catch (error) {
     logger.error('Error in heartbeat endpoint', { error: error.message });
@@ -169,9 +184,9 @@ router.post('/heartbeat', verifyAdminPassword, async (req, res) => {
 });
 
 // GET /api/admin/online - Get list of online admins
-router.get('/online', verifyAdminPassword, async (req, res) => {
+router.get('/online', verifyAdminAuth, async (req, res) => {
   try {
-    const onlineList = adminService.getOnlineAdmins();
+    const onlineList = authService.getOnlineAdmins();
     const responseDtos = onlineList.map(admin => new OnlineAdminResponseDTO(admin));
     
     res.json({
@@ -190,7 +205,7 @@ router.get('/online', verifyAdminPassword, async (req, res) => {
 // GET /api/admin/suggestions - Get all suggestions with full details
 router.get(
   '/suggestions', 
-  verifyAdminPassword, 
+  verifyAdminAuth, 
   paginationValidator, 
   handleValidationErrors, 
   async (req, res) => {
@@ -234,7 +249,7 @@ router.get(
 // GET /api/admin/suggestions/:id - Get single suggestion
 router.get(
   '/suggestions/:id', 
-  verifyAdminPassword, 
+  verifyAdminAuth, 
   suggestionIdValidator, 
   handleValidationErrors, 
   async (req, res) => {
@@ -269,7 +284,7 @@ router.get(
 // PUT /api/admin/suggestions/:id/status - Update suggestion status
 router.put(
   '/suggestions/:id/status', 
-  verifyAdminPassword, 
+  verifyAdminAuth, 
   updateStatusValidator, 
   handleValidationErrors, 
   async (req, res) => {
@@ -310,7 +325,7 @@ router.put(
 // PUT /api/admin/suggestions/:id/priority - Update suggestion priority
 router.put(
   '/suggestions/:id/priority', 
-  verifyAdminPassword, 
+  verifyAdminAuth, 
   updatePriorityValidator, 
   handleValidationErrors, 
   async (req, res) => {
@@ -351,7 +366,7 @@ router.put(
 // PUT /api/admin/suggestions/:id/read - Mark suggestion as read
 router.put(
   '/suggestions/:id/read', 
-  verifyAdminPassword, 
+  verifyAdminAuth, 
   suggestionIdValidator, 
   handleValidationErrors, 
   async (req, res) => {
@@ -392,7 +407,7 @@ router.put(
 // PUT /api/admin/suggestions/:id/archive - Toggle archive status
 router.put(
   '/suggestions/:id/archive', 
-  verifyAdminPassword, 
+  verifyAdminAuth, 
   suggestionIdValidator, 
   handleValidationErrors, 
   async (req, res) => {
@@ -435,7 +450,7 @@ router.put(
 // DELETE /api/admin/suggestions/:id - Delete suggestion
 router.delete(
   '/suggestions/:id', 
-  verifyAdminPassword, 
+  verifyAdminAuth, 
   requireDeveloperRole,
   suggestionIdValidator, 
   handleValidationErrors, 
@@ -473,7 +488,7 @@ router.delete(
 // POST /api/admin/suggestions/bulk-delete - Bulk delete suggestions
 router.post(
   '/suggestions/bulk-delete', 
-  verifyAdminPassword, 
+  verifyAdminAuth, 
   requireDeveloperRole,
   bulkDeleteValidator, 
   handleValidationErrors, 
@@ -513,7 +528,7 @@ router.post(
 );
 
 // GET /api/admin/stats - Get dashboard statistics
-router.get('/stats', verifyAdminPassword, async (req, res) => {
+router.get('/stats', verifyAdminAuth, async (req, res) => {
   try {
     const stats = await suggestionService.getStatistics();
     
@@ -533,7 +548,7 @@ router.get('/stats', verifyAdminPassword, async (req, res) => {
 // GET /api/admin/activity-logs - Get activity logs
 router.get(
   '/activity-logs', 
-  verifyAdminPassword, 
+  verifyAdminAuth, 
   activityLogQueryValidator, 
   handleValidationErrors, 
   async (req, res) => {
@@ -572,7 +587,7 @@ router.get(
 );
 
 // GET /api/admin/activity-logs/stats - Get activity log statistics
-router.get('/activity-logs/stats', verifyAdminPassword, async (req, res) => {
+router.get('/activity-logs/stats', verifyAdminAuth, async (req, res) => {
   try {
     const stats = await adminService.getActivityLogStats();
     
@@ -592,7 +607,7 @@ router.get('/activity-logs/stats', verifyAdminPassword, async (req, res) => {
 // GET /api/admin/archived - Get archived suggestions
 router.get(
   '/archived', 
-  verifyAdminPassword, 
+  verifyAdminAuth, 
   paginationValidator, 
   handleValidationErrors, 
   async (req, res) => {
@@ -624,7 +639,7 @@ router.get(
 // GET /api/admin/activity-logs/deprecated-count - Get count of logs with deprecated roles
 router.get(
   '/activity-logs/deprecated-count', 
-  verifyAdminPassword, 
+  verifyAdminAuth, 
   requireDeveloperRole, 
   async (req, res) => {
     try {
@@ -648,7 +663,7 @@ router.get(
 // DELETE /api/admin/activity-logs/cleanup - Remove old logs with deprecated roles
 router.delete(
   '/activity-logs/cleanup', 
-  verifyAdminPassword, 
+  verifyAdminAuth, 
   requireDeveloperRole, 
   async (req, res) => {
     try {

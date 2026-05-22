@@ -96,6 +96,32 @@
     flex-direction: column;
     gap: 15px;
 
+    .input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+
+      input {
+        width: 100%;
+        padding: 14px 18px;
+        border: 2px solid #333;
+        border-radius: 10px;
+        background: #0f0f1a;
+        color: #fff;
+        font-size: 16px;
+        transition: border-color 0.3s;
+
+        &:focus {
+          outline: none;
+          border-color: #667eea;
+        }
+
+        &::placeholder {
+          color: #666;
+        }
+      }
+    }
+
     .password-input-wrapper {
       position: relative;
       display: flex;
@@ -114,6 +140,10 @@
         &:focus {
           outline: none;
           border-color: #667eea;
+        }
+
+        &::placeholder {
+          color: #666;
         }
       }
 
